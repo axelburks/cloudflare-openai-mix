@@ -1,3 +1,4 @@
+var resourceName, deployName = '';
 // The deployment name you chose when you deployed the model.
 const mapper = {
   'gpt-3.5-turbo': {
@@ -29,31 +30,57 @@ addEventListener("fetch", (event) => {
 });
 
 async function handleRequest(request) {
-  const url = new URL(request.url);
-  let body;
-  if (request.method === 'POST') {
-    body = await request.json();
-  }
-  const modelName = body?.model;  
-  const modelInfo = mapper[modelName] || '' 
-
-  if (modelInfo === '') {
-    return new Response('Missing model mapper', {
-        status: 403
-    });
-  }
-  
-  // Mix: for OpenAI
-  if (modelInfo['proxy'] == 'openai') {
-    handleOpenAIRequest(request)
-  }
-
-  // Mix: for Azure
-  // https://github.com/haibbo/cf-openai-azure-proxy/blob/main/cf-openai-azure-proxy.js
   if (request.method === 'OPTIONS') {
     return handleOPTIONS(request)
   }
 
+  const url = new URL(request.url);
+  if (url.pathname === '/v1/models') {
+    return handleModels(request)
+  }
+
+  let body;
+  if (request.method === 'POST') {
+    body = await request.json();
+  }
+
+  const modelName = body?.model;
+  const modelInfo = mapper[modelName] || ''
+
+  const authKey = request.headers.get('Authorization');
+  if (!authKey) return new Response("Not allowed", { status: 403 });
+
+  const authKey_openai = authKey.split("|")[0];
+  const authKey_azure = authKey.split("|")[1];
+  
+  var modifiedHeaders = new Headers(request.headers);
+  if (modelInfo === '' || modelInfo['proxy'] == 'openai') {
+    modifiedHeaders.set('Authorization', authKey_openai)
+    const request_modified = new Request(request, {
+      headers: modifiedHeaders,
+      body: body
+    });
+    return handleOpenAIRequest(request_modified, body)
+  } else {
+    resourceName = modelInfo['resource'];
+    deployName = modelInfo['deploy'];
+    modifiedHeaders.set('Authorization', authKey_azure)
+    const request_modified = new Request(request, {
+      headers: modifiedHeaders,
+      body: body
+    });
+    return handleAzureRequest(request_modified, body)
+  }
+}
+
+// Azure
+// https://github.com/haibbo/cf-openai-azure-proxy/blob/main/cf-openai-azure-proxy.js
+async function handleAzureRequest(request, body) {
+  if (request.method === 'OPTIONS') {
+    return handleOPTIONS(request)
+  }
+
+  const url = new URL(request.url);
   if (url.pathname.startsWith("//")) {
     url.pathname = url.pathname.replace('/',"")
   }
@@ -67,8 +94,19 @@ async function handleRequest(request) {
     return new Response('404 Not Found', { status: 404 })
   }
 
-  const resourceName = modelInfo['resource'];
-  const deployName = modelInfo['deploy'];
+  // let body;
+  // if (request.method === 'POST') {
+  //   body = await request.json();
+  // }
+
+  // const modelName = body?.model;  
+  // const deployName = mapper[modelName] || '' 
+
+  // if (deployName === '') {
+  //   return new Response('Missing model mapper', {
+  //       status: 403
+  //   });
+  // }
   const fetchAPI = `https://${resourceName}.openai.azure.com/openai/deployments/${deployName}/${path}?api-version=${apiVersion}`
 
   const authKey = request.headers.get('Authorization');
@@ -192,7 +230,7 @@ async function handleOPTIONS(request) {
 
 // OpenAI
 // https://github.com/barretlee/cloudflare-proxy/blob/main/cloudflare-worker.js
-async function handleOpenAIRequest(request) {
+async function handleOpenAIRequest(request, body) {
   const url = new URL(request.url);
   const fetchAPI = request.url.replace(url.host, 'api.openai.com');
   
@@ -214,8 +252,8 @@ async function handleOpenAIRequest(request) {
     return await fetch(newRequest);
   }
 
-  let body;
-  if (request.method === 'POST') body = await request.json();
+  // let body;
+  // if (request.method === 'POST') body = await request.json();
 
   const payload = {
     method: request.method,
