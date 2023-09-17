@@ -23,7 +23,7 @@ const mapper = {
   }
 };
 
-const apiVersion="2023-05-15"
+const apiVersion = AZURE_API_VERSION;
 
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
@@ -133,7 +133,17 @@ async function handleAzureRequest(request, body) {
     return response
   } 
 
-  let { readable, writable } = new TransformStream()
+  // let { readable, writable } = new TransformStream()
+  // stream(response.body, writable);
+  // return new Response(readable, response);
+  let { readable, writable } = new TransformStream({
+    transform(chunk, controller) {
+      const decodedChunk = new TextDecoder().decode(chunk);
+      if (!decodedChunk.includes('"choices":[]')) {
+        controller.enqueue(chunk);
+      }
+    }
+  });
   stream(response.body, writable);
   return new Response(readable, response);
 
