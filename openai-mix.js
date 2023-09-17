@@ -131,19 +131,23 @@ async function handleAzureRequest(request, body) {
 
   if (body?.stream != true){
     return response
-  } 
+  }
 
-  // let { readable, writable } = new TransformStream()
-  // stream(response.body, writable);
-  // return new Response(readable, response);
-  let { readable, writable } = new TransformStream({
-    transform(chunk, controller) {
-      const decodedChunk = new TextDecoder().decode(chunk);
-      if (!decodedChunk.includes('"choices":[]')) {
-        controller.enqueue(chunk);
+  // Azure OpenAI Service w/ function call may return empty chunk which not compatible with some apps
+  if (body?.functions){
+    let { readable, writable } = new TransformStream({
+      transform(chunk, controller) {
+        const decodedChunk = new TextDecoder().decode(chunk);
+        if (!decodedChunk.includes('"choices":[]')) {
+          controller.enqueue(chunk);
+        }
       }
-    }
-  });
+    });
+    stream(response.body, writable);
+    return new Response(readable, response);
+  }
+
+  let { readable, writable } = new TransformStream()
   stream(response.body, writable);
   return new Response(readable, response);
 
