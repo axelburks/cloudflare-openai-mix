@@ -52,6 +52,19 @@ async function handleRequest(request) {
     queryString = JSON.stringify(queryString)
   }
 
+  // {{{xxxx<user_prompt>xxxx}}}: replace <user_prompt> with queryString, then place it in queryString, then del from system prompt
+  // [[[xxxxxxxx]]]: replace with queryString, then del from user prompt
+  if (systemPrompt) {
+    if (/\{\{\{([\s\S]+)\}\}\}/.test(systemPrompt)) {
+      queryString = systemPrompt.match(/\{\{\{([\s\S]+)\}\}\}/)[1].replaceAll("<user_prompt>", queryString)
+      systemPrompt = systemPrompt.replace(/\{\{\{([\s\S]+)\}\}\}/, "")
+    } else if (systemPrompt.includes("[[[<user_prompt>]]]")) {
+      systemPrompt = systemPrompt.replaceAll("[[[<user_prompt>]]]", queryString)
+      // coze will reponse null if w/o queryString
+      queryString = " "
+    }
+  }
+
   const newRequestBody = {
     // conversation_id: UA,
     bot_id: bot_id,
