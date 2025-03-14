@@ -27,7 +27,7 @@ async function handleRequest(request) {
 
   const default_bot_id = BOT_ID || "";
   const botConfig = BOT_CONFIG ? JSON.parse(BOT_CONFIG) : {};
-  const bot_id = model && botConfig[model] ? botConfig[model] : default_bot_id;
+  const bot_id = model && (model in botConfig) ? botConfig[model]['bot_id'] : default_bot_id;
   const chatHistory = [];
   let systemPrompt = "";
   for (let i = 0; i < messages.length - 1; i++) {
@@ -40,11 +40,33 @@ async function handleRequest(request) {
       if (Array.isArray(content)) {
         content = JSON.stringify(content)
       }
+
+      // transfer coze type in content to real type
+      let realContent = content;
+      let m;
+      const regex = /```json\\n({\\"type\\":\\"[\w_]+?\\",\\"content\\":.*?)\\n```\\n/gm;
+      while ((m = regex.exec(content)) !== null) {
+        if (m.index === regex.lastIndex) {
+            regex.lastIndex++;
+        }
+        try {
+          const coze_type_json = JSON.parse(m[1].replace(/\\"/g, '"'));
+          chatHistory.push({
+            role: role,
+            type: coze_type_json.type,
+            content: JSON.stringify(coze_type_json.content),
+            content_type: "text"
+          });
+          realContent = realContent.replace(m[0], '');
+        } catch {
+          console.log(m)
+        }
+      }
       chatHistory.push({
         role: role,
-        content: content,
+        content: realContent,
         content_type: "text"
-      });
+      })
     }
   }
   var queryString = messages[messages.length - 1].content;
@@ -120,7 +142,22 @@ async function handleRequest(request) {
                   const message = data.message;
                   if (message.type === "follow_up" && FOLLOW_UP_ENABLED) {
                     followUps.push(message.content);
-                  } else if (message.type !== "verbose" && message.type !== "follow_up" && message.type !== "tool_response") {
+                  } else if (['function_call', 'tool_response'].includes(message.type)) {
+                    const formattedData = {
+                      id: "chatcmpl-" + Math.random().toString(36).slice(2),
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: model,
+                      choices: [{
+                        index: 0,
+                        delta: {
+                          content: "```json\n" + `{"type":"${message.type}","content":${message.content}}` + "\n```\n"
+                        },
+                        finish_reason: data.is_finish ? "stop" : null
+                      }]
+                    };
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(formattedData)}\n\n`));
+                  } else if (!['verbose', 'follow_up', 'function_call', 'tool_response'].includes(message.type)) {
                     const formattedData = {
                       id: "chatcmpl-" + Math.random().toString(36).slice(2),
                       object: "chat.completion.chunk",
