@@ -1,13 +1,26 @@
 # cloudflare-openai-mix
 
-|Variable name|Value|Description|
-|:----|:----|:----|
-|AZURE_API_VERSION|2023-05-15|[API Version](https://github.com/Azure/azure-rest-api-specs/tree/main/specification/cognitiveservices/data-plane/AzureOpenAI/inference)| |
-|DEPLOY_NAME_GPT35|gpt-35-turbo|[Deploy Name](https://learn.microsoft.com/zh-cn/azure/ai-services/openai/reference)||
-|DEPLOY_NAME_GPT35_16K|gpt-35-turbo-16k|As Above | |
-|DEPLOY_NAME_GPT4|gpt-4|As Above | |
-|DEPLOY_NAME_GPT4_32K|gpt-4-32k|As Above | |
-|PROXY_GPT35|openai|Service Provider: openai \| azure | |
-|PROXY_GPT4|azure|As Above| |
-|RESOURCE_NAME_GPT35|xxx|[Resource Name](https://learn.microsoft.com/zh-cn/azure/ai-services/openai/reference) | |
-|RESOURCE_NAME_GPT4|xxx|As Above | |
+## ENV Vars
+BOT_CONFIG
+```json
+{
+  "default": "gpt-4o",
+  "gpt-4o": {
+    "bot_id": "coze bot id",
+    "space_bot_name": "coze space name",
+    "note": "note for youself"
+  },
+  "gpt-4o-0513": {
+    "bot_id": "coze bot id",
+    "space_bot_name": "Flcoze space name"
+  }
+}
+```
+
+R2_CONFIG
+```json
+{
+  "upload_url": "https://xxx.xxx.xxx/xxx",
+  "auth_key": "xxx"
+}
+```
