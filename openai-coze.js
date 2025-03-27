@@ -7,6 +7,8 @@ addEventListener('fetch', event => {
 const encoder = new TextEncoder();
 
 const API_URL = "https://api.coze.com/open_api/v2/chat";
+// @ts-ignore
+const botConfig = JSON.parse(BOT_CONFIG);
 
 async function handleRequest(request) {
   if (request.method === "OPTIONS") {
@@ -25,9 +27,8 @@ async function handleRequest(request) {
   const isStream = requestBody.stream;
   const model = requestBody.model;
 
-  const default_bot_id = BOT_ID || "";
-  const botConfig = BOT_CONFIG ? JSON.parse(BOT_CONFIG) : {};
-  const bot_id = model && (model in botConfig) ? botConfig[model]['bot_id'] : default_bot_id;
+  const botDefault= botConfig[botConfig['default']]['bot_id'];
+  const botID = model && (model in botConfig) ? botConfig[model]['bot_id'] : botDefault;
   const chatHistory = [];
   let systemPrompt = "";
   for (let i = 0; i < messages.length - 1; i++) {
@@ -89,7 +90,7 @@ async function handleRequest(request) {
 
   const newRequestBody = {
     // conversation_id: UA,
-    bot_id: bot_id,
+    bot_id: botID,
     user: "29032201862555",
     query: queryString,
     stream: isStream,
