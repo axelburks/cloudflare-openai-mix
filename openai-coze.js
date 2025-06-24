@@ -16,6 +16,7 @@ const r2UploadUrl = r2Config.upload_url || ''
 const r2AuthKey = r2Config.auth_key || ''
 
 let authKey;
+let cozeToken;
 
 /**
  * @param {Request} request
@@ -25,6 +26,7 @@ async function handleRequest(request) {
 
   authKey = request.headers.get('Authorization');
   if (!authKey) return new Response("Not allowed", { status: 403 });
+  cozeToken = await getCozeToken()
 
   const urlObj = new URL(request.url);
   const urlPath = urlObj.pathname;
@@ -157,9 +159,9 @@ async function handleMessageRequest(request) {
 
   const cozeRequestHeaders = {
     "Content-Type": "application/json",
-    "Authorization": authKey
+    "Authorization": `Bearer ${cozeToken}`
   }
-
+  
   const response = await fetch(COZE_CHAT_URL, {
     method: "POST",
     headers: cozeRequestHeaders,
@@ -491,7 +493,7 @@ async function uploadFile2Coze(base64Image) {
   const fileInfo = convertBase64Image2Byte(base64Image);
   const uploadUrl = COZE_UPLOAD_URL;
   const uploadHeaders = {
-    'Authorization': authKey
+    'Authorization': `Bearer ${cozeToken}`
   }
   const formData = new FormData();
   formData.append('file', new Blob([fileInfo.byte]), `${fileInfo.name}.${fileInfo.ext}`);
@@ -512,7 +514,7 @@ async function uploadFile2R2(base64Image) {
     const fileInfo = convertBase64Image2Byte(base64Image);
     const uploadUrl = `${r2UploadUrl}/${fileInfo.name}.${fileInfo.ext}`;
     const uploadHeaders = {
-      'X-Custom-Auth-Key': r2AuthKey,
+      'X-API-Key': r2AuthKey,
       'overwrite': 'true'
     }
     uploadResult = await fetchData(uploadUrl, 'PUT', uploadHeaders, fileInfo.byte);
@@ -630,4 +632,112 @@ async function fetchData(fetchUrl, fetchMethod, fetchHeaders = {}, fetchBody = n
     result.msg = `Error: ${JSON.stringify(error)}`;
   }
   return result;
+}
+
+// Base64 URL编码工具
+function base64url(str) {
+  return btoa(str)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+// 生成JWT令牌（基于Web Crypto）
+async function generateJWT() {
+  try {
+    // 准备Header
+    const header = {
+      alg: "RS256",
+      typ: "JWT",
+      kid: COZE_SIGNING_PUBLIC_KEY
+    };
+    const encodedHeader = base64url(JSON.stringify(header));
+    
+    // 准备Payload
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iat: now,
+      exp: now + 600,
+      jti: crypto.randomUUID(),
+      aud: "api.coze.com",
+      iss: '1165608857222'
+    };
+    const encodedPayload = base64url(JSON.stringify(payload));
+    
+    // 创建签名内容
+    const data = `${encodedHeader}.${encodedPayload}`;
+    const encoder = new TextEncoder();
+    const dataBuffer = encoder.encode(data);
+    
+    // 处理PEM格式私钥
+    const pemContents = COZE_SIGNING_PRIVATE_KEY
+      .replace('-----BEGIN PRIVATE KEY-----', '')
+      .replace('-----END PRIVATE KEY-----', '')
+      .replace(/\s+/g, '');
+    const binaryDer = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
+    
+    // 导入私钥
+    const privateKey = await crypto.subtle.importKey(
+      "pkcs8",
+      binaryDer,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    
+    // 生成签名
+    const signature = await crypto.subtle.sign(
+      { name: "RSASSA-PKCS1-v1_5" },
+      privateKey,
+      dataBuffer
+    );
+    
+    // 格式化并返回JWT
+    const signatureStr = String.fromCharCode(...new Uint8Array(signature));
+    return `${data}.${base64url(signatureStr)}`;
+  } catch (err) {
+    console.error('[JWT Generation]', err);
+    throw err;
+  }
+}
+
+// 使用KV获取或刷新令牌
+async function getCozeToken() {
+  // 尝试从KV获取现有令牌
+  const cachedToken = await KV_STORE_NAME.get('coze_token');
+  
+  // 如果存在且未过期，直接返回
+  if (cachedToken) {
+    return cachedToken;
+  }
+
+  const jwt = await generateJWT();
+  
+  // 请求新令牌
+  const response = await fetch("https://api.coze.com/api/permission/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${jwt}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      duration_seconds: 86399,
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`API responded with ${response.status}`);
+  }
+  
+  const result = await response.json();
+  const token = result.access_token;
+  const expiresIn = result.expires_in;
+  
+  // 在KV存储令牌（使用expirationTtl自动过期）
+  await KV_STORE_NAME.put('coze_token', token, {
+    expirationTtl: expiresIn - 600 // 提前600秒过期
+  });
+  
+  return token;
 }
