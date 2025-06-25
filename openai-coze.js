@@ -2,10 +2,12 @@ addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
 
-const COZE_CHAT_URL = "https://api.coze.com/v3/chat";
-const COZE_CHAT_RETRIEVE_URL = "https://api.coze.com/v3/chat/retrieve";
-const COZE_CHAT_MSG_URL = "https://api.coze.com/v3/chat/message/list";
-const COZE_UPLOAD_URL = "https://api.coze.com/v1/files/upload";
+const COZE_API_HOST = "api.coze.com";
+const COZE_TOKEN_URL = `https://${COZE_API_HOST}/api/permission/oauth2/token`;
+const COZE_CHAT_URL = `https://${COZE_API_HOST}/v3/chat`;
+const COZE_CHAT_RETRIEVE_URL = `https://${COZE_API_HOST}/v3/chat/retrieve`;
+const COZE_CHAT_MSG_URL = `https://${COZE_API_HOST}/v3/chat/message/list`;
+const COZE_UPLOAD_URL = `https://${COZE_API_HOST}/v1/files/upload`;
 
 // @ts-ignore
 const botConfig = JSON.parse(BOT_CONFIG);
@@ -15,7 +17,6 @@ const r2Config = JSON.parse(R2_CONFIG);
 const r2UploadUrl = r2Config.upload_url || ''
 const r2AuthKey = r2Config.auth_key || ''
 
-let authKey;
 let cozeToken;
 
 /**
@@ -24,8 +25,9 @@ let cozeToken;
 async function handleRequest(request) {
   if (request.method === "OPTIONS") return handleOptionsRequest(request);
 
-  authKey = request.headers.get('Authorization');
-  if (!authKey) return new Response("Not allowed", { status: 403 });
+  let authHeader = request.headers.get('Authorization');
+  // @ts-ignore
+  if (!authHeader || authHeader != AUTH_HEADER) return new Response("Not allowed", { status: 403 });
   cozeToken = await getCozeToken()
 
   const urlObj = new URL(request.url);
@@ -659,7 +661,7 @@ async function generateJWT() {
       iat: now,
       exp: now + 600,
       jti: crypto.randomUUID(),
-      aud: "api.coze.com",
+      aud: COZE_API_HOST,
       iss: '1165608857222'
     };
     const encodedPayload = base64url(JSON.stringify(payload));
@@ -714,7 +716,7 @@ async function getCozeToken() {
   const jwt = await generateJWT();
   
   // 请求新令牌
-  const response = await fetch("https://api.coze.com/api/permission/oauth2/token", {
+  const response = await fetch(COZE_TOKEN_URL, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${jwt}`,
