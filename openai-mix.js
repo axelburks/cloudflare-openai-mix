@@ -54,14 +54,7 @@ async function handleRequest(request) {
   const authKey_azure = authKey.split("|")[1];
   
   var modifiedHeaders = new Headers(request.headers);
-  if (modelInfo === '' || modelInfo['proxy'] == 'openai') {
-    modifiedHeaders.set('Authorization', authKey_openai)
-    const request_modified = new Request(request, {
-      headers: modifiedHeaders,
-      body: body
-    });
-    return handleOpenAIRequest(request_modified, body)
-  } else {
+  if (modelInfo['proxy'] == 'azure') {
     resourceName = modelInfo['resource'];
     deployName = modelInfo['deploy'];
     modifiedHeaders.set('Authorization', authKey_azure)
@@ -70,6 +63,13 @@ async function handleRequest(request) {
       body: body
     });
     return handleAzureRequest(request_modified, body)
+  } else {
+    modifiedHeaders.set('Authorization', authKey_openai)
+    const request_modified = new Request(request, {
+      headers: modifiedHeaders,
+      body: body
+    });
+    return handleOpenAIRequest(request_modified, body)
   }
 }
 
@@ -297,4 +297,83 @@ async function handleOpenAIRequest(request, body) {
       headers: response.headers,
     });
   }
+}
+
+
+// Azure - Image
+// https://learn.microsoft.com/zh-cn/azure/ai-services/openai/reference#request-a-generated-image
+async function handleAzureImageRequest(request, body) {
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("//")) {
+    url.pathname = url.pathname.replace('/',"")
+  }
+  if (url.pathname === '/v1/chat/completions') {
+    var path="chat/completions"
+  } else if (url.pathname === '/v1/completions') {
+    var path="completions"
+  } else if (url.pathname === 'v1/images/generations') {
+    var path="completions"
+  } else if (url.pathname === '/v1/models') {
+    return handleModels(request)
+  } else {
+    return new Response('404 Not Found', { status: 404 })
+  }
+
+  // let body;
+  // if (request.method === 'POST') {
+  //   body = await request.json();
+  // }
+
+  // const modelName = body?.model;  
+  // const deployName = mapper[modelName] || '' 
+
+  // if (deployName === '') {
+  //   return new Response('Missing model mapper', {
+  //       status: 403
+  //   });
+  // }
+  const fetchAPI = `https://${resourceName}.openai.azure.com/openai/deployments/${deployName}/${path}?api-version=${apiVersion}`
+
+  const authKey = request.headers.get('Authorization');
+  if (!authKey) {
+    return new Response("Not allowed", {
+      status: 403
+    });
+  }
+
+  const payload = {
+    method: request.method,
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": authKey.replace('Bearer ', ''),
+    },
+    body: typeof body === 'object' ? JSON.stringify(body) : '{}',
+  };
+
+  let response = await fetch(fetchAPI, payload);
+  response = new Response(response.body, response);
+  response.headers.set("Access-Control-Allow-Origin", "*");
+
+  if (body?.stream != true){
+    return response
+  }
+
+  // Azure OpenAI Service w/ function call may return empty chunk which not compatible with some apps
+  if (body?.functions){
+    let { readable, writable } = new TransformStream({
+      transform(chunk, controller) {
+        const decodedChunk = new TextDecoder().decode(chunk);
+        if (!decodedChunk.includes('"choices":[]')) {
+          controller.enqueue(chunk);
+        }
+      }
+    });
+    stream(response.body, writable);
+    return new Response(readable, response);
+  }
+
+  let { readable, writable } = new TransformStream()
+  stream(response.body, writable);
+  return new Response(readable, response);
+
 }
